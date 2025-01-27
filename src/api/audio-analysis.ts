@@ -31,7 +31,8 @@ interface AudioAnalysisResponse {
 async function runTempoAnalysis(audioBuffer: AudioBuffer): Promise<{ bpm: number; confidence: number }> {
   const bufferSize = 4096;
   const hopSize = 256;
-  const tempo = new aubiojs.Tempo(bufferSize, hopSize, audioBuffer.sampleRate);
+  const aubio = await aubiojs();
+  const tempo = new aubio.Tempo(bufferSize, hopSize, audioBuffer.sampleRate);
   
   let totalBpm = 0;
   let totalConfidence = 0;
@@ -67,8 +68,8 @@ async function analyzeOnsets(audioBuffer: AudioBuffer, method: string = "default
   const bufferSize = 4096;
   const hopSize = 256;
   
-  const onsetDetector = new aubiojs.Onset(
-    method,
+  const aubio = await aubiojs();
+  const onsetDetector = new aubio.Onset(
     bufferSize,
     hopSize,
     audioBuffer.sampleRate
@@ -98,7 +99,8 @@ async function analyzePitch(audioBuffer: AudioBuffer): Promise<Array<{ time: num
   const bufferSize = 4096;
   const hopSize = 256;
   
-  const pitchDetector = new aubiojs.Pitch(
+  const aubio = await aubiojs();
+  const pitchDetector = new aubio.Pitch(
     "default",
     bufferSize,
     hopSize,
