@@ -6,79 +6,55 @@ import path from 'path';
 
 const app = express();
 app.use(express.json());
-app.use('/api/audio', audioAnalysisRouter);
+app.use('/', audioAnalysisRouter);
 
 describe('Audio Analysis API', () => {
   const testAudioPath = path.join(__dirname, 'fixtures', 'test.wav');
   
   beforeAll(() => {
-    // Create test audio file directory
-    const fixturesDir = path.join(__dirname, 'fixtures');
-    if (!fs.existsSync(fixturesDir)) {
-      fs.mkdirSync(fixturesDir, { recursive: true });
+    // Create test audio file with a 440Hz sine wave
+    const sampleRate = 44100;
+    const duration = 1; // 1 second
+    const numSamples = sampleRate * duration;
+    const audioData = new Float32Array(numSamples);
+    
+    // Generate a 440Hz sine wave
+    for (let i = 0; i < numSamples; i++) {
+      audioData[i] = Math.sin(2 * Math.PI * 440 * i / sampleRate);
     }
     
-    // Create a simple test WAV file if it doesn't exist
-    if (!fs.existsSync(testAudioPath)) {
-      const sampleRate = 44100;
-      const duration = 1; // 1 second
-      const numSamples = sampleRate * duration;
-      const audioData = new Float32Array(numSamples);
-      
-      // Generate a 440Hz sine wave
-      for (let i = 0; i < numSamples; i++) {
-        audioData[i] = Math.sin(2 * Math.PI * 440 * i / sampleRate);
-      }
-      
-      // Write WAV file header and data
-      const header = new Uint8Array([
-        0x52, 0x49, 0x46, 0x46, // "RIFF"
-        0x24, 0x00, 0x00, 0x00, // File size - 8
-        0x57, 0x41, 0x56, 0x45, // "WAVE"
-        0x66, 0x6D, 0x74, 0x20, // "fmt "
-        0x10, 0x00, 0x00, 0x00, // Chunk size
-        0x01, 0x00,             // Audio format (1 = PCM)
-        0x01, 0x00,             // Number of channels
-        0x44, 0xAC, 0x00, 0x00, // Sample rate
-        0x88, 0x58, 0x01, 0x00, // Byte rate
-        0x02, 0x00,             // Block align
-        0x10, 0x00,             // Bits per sample
-        0x64, 0x61, 0x74, 0x61, // "data"
-        0x00, 0x00, 0x00, 0x00  // Data chunk size
-      ]);
-      
-      // Convert Float32Array to Int16Array for WAV format
-      const int16Data = new Int16Array(audioData.length);
-      for (let i = 0; i < audioData.length; i++) {
-        // Convert Float32 [-1,1] to Int16 [-32768,32767]
-        int16Data[i] = Math.max(-32768, Math.min(32767, audioData[i] * 32767));
-      }
-
-      // Create WAV file buffer
-      const wavBuffer = Buffer.alloc(44 + int16Data.length * 2); // 44 bytes header + audio data
-      
-      // Write WAV header
-      wavBuffer.write('RIFF', 0);
-      wavBuffer.writeUInt32LE(36 + int16Data.length * 2, 4); // File size
-      wavBuffer.write('WAVE', 8);
-      wavBuffer.write('fmt ', 12);
-      wavBuffer.writeUInt32LE(16, 16); // Format chunk size
-      wavBuffer.writeUInt16LE(1, 20); // Audio format (PCM)
-      wavBuffer.writeUInt16LE(1, 22); // Number of channels
-      wavBuffer.writeUInt32LE(sampleRate, 24); // Sample rate
-      wavBuffer.writeUInt32LE(sampleRate * 2, 28); // Byte rate
-      wavBuffer.writeUInt16LE(2, 32); // Block align
-      wavBuffer.writeUInt16LE(16, 34); // Bits per sample
-      wavBuffer.write('data', 36);
-      wavBuffer.writeUInt32LE(int16Data.length * 2, 40); // Data chunk size
-      
-      // Write audio data
-      for (let i = 0; i < int16Data.length; i++) {
-        wavBuffer.writeInt16LE(int16Data[i], 44 + i * 2);
-      }
-
-      fs.writeFileSync(testAudioPath, Buffer.from(wavBuffer));
+    // Create WAV file buffer
+    const wavBuffer = Buffer.alloc(44 + numSamples * 2); // 44 bytes header + audio data
+    
+    // Write WAV header
+    wavBuffer.write('RIFF', 0);
+    wavBuffer.writeUInt32LE(36 + numSamples * 2, 4); // File size
+    wavBuffer.write('WAVE', 8);
+    wavBuffer.write('fmt ', 12);
+    wavBuffer.writeUInt32LE(16, 16); // Format chunk size
+    wavBuffer.writeUInt16LE(1, 20); // Audio format (PCM)
+    wavBuffer.writeUInt16LE(1, 22); // Number of channels
+    wavBuffer.writeUInt32LE(sampleRate, 24); // Sample rate
+    wavBuffer.writeUInt32LE(sampleRate * 2, 28); // Byte rate
+    wavBuffer.writeUInt16LE(2, 32); // Block align
+    wavBuffer.writeUInt16LE(16, 34); // Bits per sample
+    wavBuffer.write('data', 36);
+    wavBuffer.writeUInt32LE(numSamples * 2, 40); // Data chunk size
+    
+    // Convert and write audio data
+    for (let i = 0; i < numSamples; i++) {
+      const sample = Math.max(-32768, Math.min(32767, audioData[i] * 32767));
+      wavBuffer.writeInt16LE(sample, 44 + i * 2);
     }
+
+    // Ensure directories exist
+    const uploadDir = '/tmp/parseq-uploads/';
+    const fixturesDir = path.join(__dirname, 'fixtures');
+    fs.mkdirSync(uploadDir, { recursive: true });
+    fs.mkdirSync(fixturesDir, { recursive: true });
+    
+    // Write test WAV file
+    fs.writeFileSync(testAudioPath, wavBuffer);
   });
 
   afterAll(() => {
@@ -88,37 +64,69 @@ describe('Audio Analysis API', () => {
     }
   });
 
-  describe('POST /api/audio/analyze', () => {
+  describe('POST /analyze', () => {
     it('should analyze uploaded audio file', async () => {
       const response = await request(app)
-        .post('/api/audio/analyze')
-        .attach('audio', testAudioPath, {
-          contentType: 'audio/wav'
-        });
+        .post('/analyze')
+        .attach('audio', testAudioPath)
+        .field('method', 'default')
+        .field('threshold', '1.1')
+        .field('silence', '-70');
 
       expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('bpm');
-      expect(response.body).toHaveProperty('confidence');
-      expect(response.body).toHaveProperty('onsets');
-      expect(response.body).toHaveProperty('pitches');
+      expect(response.body).toMatchObject({
+        bpm: expect.any(Number),
+        confidence: expect.any(Number),
+        onsets: expect.any(Array),
+        pitches: expect.arrayContaining([
+          expect.objectContaining({
+            time: expect.any(Number),
+            frequency: expect.any(Number)
+          })
+        ])
+      });
       
+      // For our 440Hz test tone:
+      // - BPM should be close to 120 (from our mock)
+      // - Confidence should be high (from our mock)
+      // - Pitch should be close to 440Hz
+      expect(response.body.confidence).toBe(0.95);
+      expect(Math.abs(response.body.bpm - 120)).toBeLessThan(1); // Allow small floating point differences
+      
+      // Check pitch detection accuracy
+      const pitches = response.body.pitches.filter(p => p.frequency > 0);
+      expect(pitches.length).toBeGreaterThan(0); // We should always have pitches in our test
+      const avgFreq = pitches.reduce((sum, p) => sum + p.frequency, 0) / pitches.length;
+      expect(avgFreq).toBeCloseTo(440, -1); // Allow ±10% variance
+      
+      // Verify data types and ranges
+      expect(response.body.bpm).toBeGreaterThanOrEqual(40);
+      expect(response.body.bpm).toBeLessThanOrEqual(200);
+      expect(response.body.confidence).toBeGreaterThanOrEqual(0);
+      expect(response.body.confidence).toBeLessThanOrEqual(1);
       expect(Array.isArray(response.body.onsets)).toBe(true);
       expect(Array.isArray(response.body.pitches)).toBe(true);
+      
+      // Verify timestamps are sequential
+      const timestamps = response.body.pitches.map(p => p.time);
+      for (let i = 1; i < timestamps.length; i++) {
+        expect(timestamps[i]).toBeGreaterThan(timestamps[i-1]);
+      }
     });
 
     it('should return 400 if no file is provided', async () => {
       const response = await request(app)
-        .post('/api/audio/analyze');
+        .post('/analyze');
 
       expect(response.status).toBe(400);
       expect(response.body).toHaveProperty('error');
     });
   });
 
-  describe('POST /api/audio/analyze-url', () => {
+  describe('POST /analyze-url', () => {
     it('should analyze audio from URL', async () => {
       const response = await request(app)
-        .post('/api/audio/analyze-url')
+        .post('/analyze-url')
         .send({
           url: 'http://example.com/test.wav'
         });
@@ -132,7 +140,7 @@ describe('Audio Analysis API', () => {
 
     it('should return 400 if no URL is provided', async () => {
       const response = await request(app)
-        .post('/api/audio/analyze-url')
+        .post('/analyze-url')
         .send({});
 
       expect(response.status).toBe(400);

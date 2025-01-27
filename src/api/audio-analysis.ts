@@ -6,10 +6,31 @@ import aubiojs from 'aubiojs';
 import path from 'path';
 
 const router = Router();
-const upload = multer({ 
-  dest: '/tmp/parseq-uploads/',
+// Constants for audio analysis
+const BUFFER_SIZE = 4096;  // Standard FFT window size for audio analysis
+const HOP_SIZE = 256;      // Standard hop size for overlap-add processing
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB max file size
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = '/tmp/parseq-uploads/';
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    // Generate unique filename with original extension
+    const ext = path.extname(file.originalname);
+    cb(null, `${Date.now()}-${Math.round(Math.random() * 1E9)}${ext}`);
+  }
+});
+
+const upload = multer({
+  storage,
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB max file size
+    fileSize: MAX_FILE_SIZE,
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['audio/wav', 'audio/mpeg', 'audio/mp3', 'audio/ogg'];
@@ -29,8 +50,9 @@ interface AudioAnalysisResponse {
 }
 
 async function runTempoAnalysis(audioBuffer: AudioBuffer): Promise<{ bpm: number; confidence: number }> {
-  const bufferSize = 4096;
-  const hopSize = 256;
+  // Use standard buffer and hop sizes for consistent analysis
+  const bufferSize = BUFFER_SIZE;
+  const hopSize = HOP_SIZE;
   const aubio = await aubiojs();
   const tempo = new aubio.Tempo(bufferSize, hopSize, audioBuffer.sampleRate);
   
@@ -65,8 +87,9 @@ async function runTempoAnalysis(audioBuffer: AudioBuffer): Promise<{ bpm: number
 
 async function analyzeOnsets(audioBuffer: AudioBuffer, method: string = "default", threshold: number = 1.1, silence: number = -70): Promise<number[]> {
   const onsets: number[] = [];
-  const bufferSize = 4096;
-  const hopSize = 256;
+  // Use standard buffer and hop sizes for consistent analysis
+  const bufferSize = BUFFER_SIZE;
+  const hopSize = HOP_SIZE;
   
   const aubio = await aubiojs();
   const onsetDetector = new aubio.Onset(
@@ -96,8 +119,9 @@ async function analyzeOnsets(audioBuffer: AudioBuffer, method: string = "default
 
 async function analyzePitch(audioBuffer: AudioBuffer): Promise<Array<{ time: number; frequency: number }>> {
   const pitches: Array<{ time: number; frequency: number }> = [];
-  const bufferSize = 4096;
-  const hopSize = 256;
+  // Use standard buffer and hop sizes for consistent analysis
+  const bufferSize = BUFFER_SIZE;
+  const hopSize = HOP_SIZE;
   
   const aubio = await aubiojs();
   const pitchDetector = new aubio.Pitch(
@@ -125,8 +149,18 @@ async function analyzePitch(audioBuffer: AudioBuffer): Promise<Array<{ time: num
   return pitches;
 }
 
-router.post('/analyze', upload.single('audio'), async (req, res) => {
+router.post('/analyze', async (req, res) => {
   try {
+    // Ensure upload directory exists
+    // Handle file upload
+    const uploadMiddleware = upload.single('audio');
+    await new Promise((resolve, reject) => {
+      uploadMiddleware(req, res, (err) => {
+        if (err) reject(err);
+        else resolve(undefined);
+      });
+    });
+
     if (!req.file) {
       return res.status(400).json({ error: 'No audio file provided' });
     }
@@ -163,7 +197,7 @@ router.post('/analyze', upload.single('audio'), async (req, res) => {
   }
 });
 
-router.post('/analyze-url', async (req, res) => {
+router.post('/analyze-url', express.json(), async (req, res) => {
   try {
     const { url } = req.body;
     if (!url) {
